@@ -25,27 +25,11 @@
 //
 //------------------------------------------------------------------------------
 
-using System;
-using System.Security.Claims;
-
-namespace Microsoft.IdentityModel.Tokens
+namespace System.IdentityModel.Tokens.Jwt
 {
-    public class SecurityTokenDescriptor
+    public enum JwtTypes
     {
-        public string Audience { get; set; }
-
-        public DateTime? Expires { get; set; }
-
-        public string Issuer { get; set; }
-
-        public DateTime? IssuedAt { get; set; }
-
-        public DateTime? NotBefore { get; set; }
-
-        public SigningCredentials SigningCredentials { get; set; }
-
-        public ClaimsIdentity Subject { get; set; }
-
-        public EncryptingCredentials EncryptingCredentials { get; set; }
+        JWS,
+        JWE
     }
 }

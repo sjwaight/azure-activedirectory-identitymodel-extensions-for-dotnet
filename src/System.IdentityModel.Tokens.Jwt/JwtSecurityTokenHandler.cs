@@ -50,7 +50,6 @@ namespace System.IdentityModel.Tokens.Jwt
         private const string Namespace = "http://schemas.xmlsoap.org/ws/2005/05/identity/claimproperties";
         private static string shortClaimTypeProperty = Namespace + "/ShortTypeName";
         private static string jsonClaimTypeProperty = Namespace + "/json_type";
-        private static string[] tokenTypeIdentifiers = { JwtConstants.TokenTypeAlt, JwtConstants.TokenType };
         private int _maximumTokenSizeInBytes = TokenValidationParameters.DefaultMaximumTokenSizeInBytes;
         private int _defaultTokenLifetimeInMinutes = DefaultTokenLifetimeInMinutes;
         private IDictionary<string, string> _inboundClaimTypeMap;
@@ -282,14 +281,14 @@ namespace System.IdentityModel.Tokens.Jwt
                 return false;
             }
 
-            // Quick fix prior to beta8, will add configuration in RC
-            var regex = new Regex(JwtConstants.JsonCompactSerializationRegex);
-            if (regex.MatchTimeout == Timeout.InfiniteTimeSpan)
-            {
-                regex = new Regex(JwtConstants.JsonCompactSerializationRegex, RegexOptions.None, TimeSpan.FromMilliseconds(100));
-            }
+            // match jws
+            var regex = new Regex(JwtConstants.JsonCompactSerializationRegex, RegexOptions.None, TimeSpan.FromMilliseconds(100));
 
+            // match jwe
             if( !regex.IsMatch(tokenString))
+                regex = new Regex(JwtConstants.JweCompactSerializationRegex, RegexOptions.None, TimeSpan.FromMilliseconds(100));
+
+            if (!regex.IsMatch(tokenString))
             {
                 IdentityModelEventSource.Logger.WriteInformation(LogMessages.IDX10720);
                 return false;
@@ -339,7 +338,17 @@ namespace System.IdentityModel.Tokens.Jwt
         /// <exception cref="ArgumentException">if 'expires' &lt;= 'notBefore'.</exception>
         public virtual string CreateEncodedJwt(string issuer, string audience, ClaimsIdentity subject, DateTime? notBefore, DateTime? expires, DateTime? issuedAt, SigningCredentials signingCredentials)
         {
-            return CreateJwtSecurityTokenPrivate(issuer, audience, subject, notBefore, expires, issuedAt, signingCredentials).RawData;
+            if (tokenDescriptor.EncryptingCredentials == null)
+                return CreateJwtSecurityTokenPrivate(issuer, audience, subject, notBefore, expires, issuedAt, signingCredentials).RawData;
+            else
+                return (CreateJwe(
+                    tokenDescriptor.Issuer,
+                    tokenDescriptor.Audience,
+                    tokenDescriptor.Claims,
+                    tokenDescriptor.NotBefore,
+                    tokenDescriptor.Expires,
+                    tokenDescriptor.IssuedAt,
+                    tokenDescriptor.EncryptingCredentials)).RawData;
         }
 
         /// <summary>
@@ -351,7 +360,6 @@ namespace System.IdentityModel.Tokens.Jwt
         {
             if (tokenDescriptor == null)
                 throw LogHelper.LogArgumentNullException(nameof(tokenDescriptor));
-
             return CreateJwtSecurityTokenPrivate(
                 tokenDescriptor.Issuer,
                 tokenDescriptor.Audience,
@@ -360,6 +368,31 @@ namespace System.IdentityModel.Tokens.Jwt
                 tokenDescriptor.Expires,
                 tokenDescriptor.IssuedAt,
                 tokenDescriptor.SigningCredentials);
+        }
+
+        public JwtSecurityToken CreateJwtSecurityToken(SecurityTokenDescriptor tokenDescriptor, JwtTypes jwtType)
+        {
+            if (tokenDescriptor == null)
+                throw LogHelper.LogArgumentNullException(nameof(tokenDescriptor));
+
+            if (jwtType == JwtTypes.JWS)
+                return CreateJwtSecurityTokenPrivate(
+                    tokenDescriptor.Issuer,
+                    tokenDescriptor.Audience,
+                    tokenDescriptor.Subject,
+                    tokenDescriptor.NotBefore,
+                    tokenDescriptor.Expires,
+                    tokenDescriptor.IssuedAt,
+                    tokenDescriptor.SigningCredentials);
+            else
+                return (CreateJwe(
+                    tokenDescriptor.Issuer,
+                    tokenDescriptor.Audience,
+                    tokenDescriptor.Claims,
+                    tokenDescriptor.NotBefore,
+                    tokenDescriptor.Expires,
+                    tokenDescriptor.IssuedAt,
+                    tokenDescriptor.EncryptingCredentials));
         }
 
         /// <summary>
@@ -406,6 +439,17 @@ namespace System.IdentityModel.Tokens.Jwt
                 tokenDescriptor.SigningCredentials);
         }
 
+        public virtual JwtSecurityToken CreateJweToken(string issuer = null, string audience = null, ClaimsIdentity subject = null, DateTime? notBefore = null, DateTime? expires = null, DateTime? issuedAt = null, EncryptingCredentials encryptingCredentials = null)
+        {
+            var jwe = CreateJwe(issuer, audience, (subject != null ? subject.Claims : null), notBefore, expires, issuedAt, encryptingCredentials);
+            if (subject != null && subject.Actor != null)
+            {
+                jwe.Payload.AddClaim(new Claim(JwtRegisteredClaimNames.Actort, this.CreateActorValue(subject.Actor)));
+            }
+
+            return jwe;
+        }
+
         private JwtSecurityToken CreateJwtSecurityTokenPrivate(string issuer, string audience, ClaimsIdentity subject, DateTime? notBefore, DateTime? expires, DateTime? issuedAt, SigningCredentials signingCredentials)
         {
             if (SetDefaultTimesOnTokenCreation)
@@ -438,11 +482,53 @@ namespace System.IdentityModel.Tokens.Jwt
             if (signingCredentials != null)
             {
                 IdentityModelEventSource.Logger.WriteVerbose(LogMessages.IDX10645);
-                rawSignature = CreateEncodedSignature(signingInput, signingCredentials.Key.GetSignatureProviderForSigning(signingCredentials.Algorithm));
+                rawSignature = CreateEncodedSignature(signingInput, signingCredentials.Key.CryptoProviderFactory.CreateForSigning(signingCredentials.Key, signingCredentials.Algorithm));
             }
 
             IdentityModelEventSource.Logger.WriteInformation(LogMessages.IDX10722, rawHeader, rawPayload, rawSignature);
             return new JwtSecurityToken(header, payload, rawHeader, rawPayload, rawSignature);
+        }
+
+        private JwtSecurityToken CreateJwe(string issuer, string audience, IEnumerable<Claim> claims, DateTime? notBefore, DateTime? expires, DateTime? issuedAt, EncryptingCredentials encryptingCredentials)
+        {
+            if (encryptingCredentials == null)
+                return null;
+
+            if (SetDefaultTimesOnTokenCreation)
+            {
+                DateTime now = DateTime.UtcNow;
+                if (!expires.HasValue)
+                    expires = now + TimeSpan.FromMinutes(TokenLifetimeInMinutes);
+
+                if (!issuedAt.HasValue)
+                    issuedAt = now;
+
+                if (!notBefore.HasValue)
+                    notBefore = now;
+            }
+
+            IdentityModelEventSource.Logger.WriteVerbose(LogMessages.IDX10721, (audience ?? "null"), (issuer ?? "null"));
+            JwtPayload payload = new JwtPayload(issuer, audience, (claims == null ? null : OutboundClaimTypeTransform(claims)), notBefore, expires, issuedAt);
+            JweHeader header = new JweHeader(encryptingCredentials);
+
+            IdentityModelEventSource.Logger.WriteVerbose(LogMessages.IDX10645);
+            string rawHeader = header.Base64UrlEncode();
+            string authenticationTag = null;
+            string encryptedPayload = EncryptPayload(payload, header.EncryptingCredentials, out authenticationTag);
+            string jweEncryptedKey = EncryptContentEncryptionKey(header.EncryptingCredentials.ContentEncryptionKey, header.EncryptingCredentials);
+
+            return new JwtSecurityToken(header, jweEncryptedKey, header.EncryptingCredentials.InitializationVector, encryptedPayload, authenticationTag);
+        }
+
+        private string EncryptContentEncryptionKey(SecurityKey contentEncryptionKey, EncryptingCredentials encryptingCredentials)
+        {
+            return null;
+        }
+
+        private string EncryptPayload(JwtPayload payload, EncryptingCredentials encryptingCredentials, out string authenticationTag)
+        {
+            authenticationTag = string.Empty;
+            return null;
         }
 
         private IEnumerable<Claim> OutboundClaimTypeTransform(IEnumerable<Claim> claims)
@@ -512,41 +598,64 @@ namespace System.IdentityModel.Tokens.Jwt
             if (token.Length > MaximumTokenSizeInBytes)
                 throw LogHelper.LogException<ArgumentException>(LogMessages.IDX10209, token.Length, MaximumTokenSizeInBytes);
 
-            JwtSecurityToken jwt = null;
-
             if (validationParameters.CryptoProviderFactory != null)
                 CryptoProviderFactory.Default = validationParameters.CryptoProviderFactory;
 
-            if (validationParameters.SignatureValidator != null)
-            {
-                var validatedJwtToken = validationParameters.SignatureValidator(token, validationParameters);
-                if (validatedJwtToken == null)
-                    throw LogHelper.LogException<SecurityTokenInvalidSignatureException>(LogMessages.IDX10505, token);
+            JwtSecurityToken jwt = ReadJwtToken(token);
+            if (jwt.IsJwe)
+                token = DecryptPayload(jwt, validationParameters);
 
-                jwt = validatedJwtToken as JwtSecurityToken;
-                if (jwt == null)
-                    throw LogHelper.LogException<SecurityTokenInvalidSignatureException>(LogMessages.IDX10506, typeof(JwtSecurityToken), validatedJwtToken.GetType(), token);
-            }
-            else
+            if (CanReadToken(token))
             {
-                jwt = ValidateSignature(token, validationParameters);
-                if (jwt == null)
-                    throw LogHelper.LogException<SecurityTokenInvalidSignatureException>(LogMessages.IDX10507, token);
-            }
-
-            if (jwt.SigningKey != null && validationParameters.ValidateIssuerSigningKey)
-            {
-                if (validationParameters.IssuerSigningKeyValidator != null)
+                if (validationParameters.RequireSignedTokens)
                 {
-                    if (!validationParameters.IssuerSigningKeyValidator(jwt.SigningKey, validationParameters))
-                        throw LogHelper.LogException<SecurityTokenInvalidSigningKeyException>(LogMessages.IDX10232, jwt.SigningKey);
+                    if (validationParameters.SignatureValidator != null)
+                    {
+                        var validatedJwtToken = validationParameters.SignatureValidator(token, validationParameters);
+                        if (validatedJwtToken == null)
+                            throw LogHelper.LogException<SecurityTokenInvalidSignatureException>(LogMessages.IDX10505, token);
+
+                        jwt = validatedJwtToken as JwtSecurityToken;
+                        if (jwt == null)
+                            throw LogHelper.LogException<SecurityTokenInvalidSignatureException>(LogMessages.IDX10506, typeof(JwtSecurityToken), validatedJwtToken.GetType(), token);
+                    }
+                    else
+                    {
+                        jwt = ValidateSignature(token, validationParameters);
+                        if (jwt == null)
+                            throw LogHelper.LogException<SecurityTokenInvalidSignatureException>(LogMessages.IDX10507, token);
+                    }
                 }
                 else
                 {
-                    ValidateIssuerSecurityKey(jwt.SigningKey, jwt, validationParameters);
+                    jwt = ReadJwtToken(token);
+                }
+
+                if (jwt.SigningKey != null && validationParameters.ValidateIssuerSigningKey)
+                {
+                    if (validationParameters.IssuerSigningKeyValidator != null)
+                    {
+                        if (!validationParameters.IssuerSigningKeyValidator(jwt.SigningKey, validationParameters))
+                            throw LogHelper.LogException<SecurityTokenInvalidSigningKeyException>(LogMessages.IDX10232, jwt.SigningKey);
+                    }
+                    else
+                    {
+                        ValidateIssuerSecurityKey(jwt.SigningKey, jwt, validationParameters);
+                    }
                 }
             }
+            else
+            {
+                if (validationParameters.RequireSignedTokens)
+                {
+                    //throw
+                }
+                else
+                {
+                    // set the payload correctly
+                }
 
+            }
             DateTime? notBefore = null;
             if (jwt.Payload.Nbf != null)
             {
@@ -616,6 +725,77 @@ namespace System.IdentityModel.Tokens.Jwt
             return new ClaimsPrincipal(identity);
         }
 
+        public string DecryptPayload(JwtSecurityToken jwt, TokenValidationParameters validationParameters)
+        {
+            SymmetricSecurityKey contentEncryptionKey = GetContentEncryptionKey(jwt, validationParameters) as SymmetricSecurityKey;
+            string plainText = null;
+
+            if (contentEncryptionKey != null)
+            {
+                if (validationParameters.DecryptCipherText != null)
+                {
+                    plainText = validationParameters.DecryptCipherText(jwt, contentEncryptionKey, validationParameters);
+                }
+                else
+                {
+                    SymmetricEncryptionProvider encryptionProvider = new SymmetricEncryptionProvider(contentEncryptionKey, jwt.JweHeader.Enc, jwt.InitializationVector);
+                    encryptionProvider.AuthenticationTag = jwt.AuthenticationTag;
+                    byte[] plainTextBytes = encryptionProvider.Decrypt(Encoding.UTF8.GetBytes(jwt.CipherText));
+                    if (plainTextBytes != null)
+                        plainText = Encoding.UTF8.GetString(plainTextBytes);
+                }
+            }
+
+            return plainText;
+        }
+
+        public SecurityKey GetContentEncryptionKey(JwtSecurityToken jwt, TokenValidationParameters validationParameters)
+        {
+            string keyEncAlg = jwt.JweHeader.Alg;
+            IEnumerable<SecurityKey> jweEncryptionKeys = null;
+            byte[] contentEncryptionKey = null;
+            if (validationParameters.EncryptionKeyResolver != null)
+            {
+                jweEncryptionKeys = validationParameters.EncryptionKeyResolver(jwt.RawData, jwt, jwt.JweHeader.Kid, validationParameters);
+            }
+
+            if (jweEncryptionKeys == null)
+            {
+                SecurityKey jweEncryptionKey = GetJweEncryptionKey(keyEncAlg, jwt);
+                jweEncryptionKeys = new List<SecurityKey> { jweEncryptionKey };
+            }
+
+            foreach (SecurityKey key in jweEncryptionKeys)
+            {
+                if (key == null)
+                    LogHelper.LogArgumentNullException("key");
+                try
+                {
+
+                    var encryptionProvider = key.CryptoProviderFactory.CreateForDecrypting(key, keyEncAlg, null);
+                    contentEncryptionKey = encryptionProvider.Decrypt(Encoding.UTF8.GetBytes(jwt.JweEncryptedKey));
+                    if (contentEncryptionKey != null)
+                        return new SymmetricSecurityKey(contentEncryptionKey);
+                }
+                catch (Exception)
+                {
+
+                }
+            }
+            return null;
+        }
+
+        private SecurityKey GetJweEncryptionKey(string keyEncAlg, JwtSecurityToken jwt)
+        {
+            KeyManagementModes mode = GetKeyManagementMode(keyEncAlg);
+            return null;
+        }
+
+        private KeyManagementModes GetKeyManagementMode(string keyEncAlg)
+        {
+            return KeyManagementModes.DirectEncryption;
+        }
+
         /// <summary>
         /// Writes the <see cref="JwtSecurityToken"/> as a JSON Compact serialized format string.
         /// </summary>
@@ -639,7 +819,7 @@ namespace System.IdentityModel.Tokens.Jwt
             if (jwt.SigningCredentials == null)
                 return signingInput + ".";
             else
-                return signingInput + "." + CreateEncodedSignature(signingInput, jwt.SigningCredentials.Key.GetSignatureProviderForSigning(jwt.SigningCredentials.Algorithm));
+                return signingInput + "." + CreateEncodedSignature(signingInput, jwt.SigningCredentials.Key.CryptoProviderFactory.CreateForSigning(jwt.SigningCredentials.Key, jwt.SigningCredentials.Algorithm));
         }
 
         /// <summary>
@@ -693,7 +873,6 @@ namespace System.IdentityModel.Tokens.Jwt
                 throw LogHelper.LogArgumentNullException("validationParameters");
 
             JwtSecurityToken jwt = ReadJwtToken(token);
-            byte[] encodedBytes = Encoding.UTF8.GetBytes(jwt.RawHeader + "." + jwt.RawPayload);
             if (string.IsNullOrEmpty(jwt.RawSignature))
             {
                 if (validationParameters.RequireSignedTokens)
@@ -702,6 +881,7 @@ namespace System.IdentityModel.Tokens.Jwt
                     return jwt;
             }
 
+            byte[] encodedBytes = Encoding.UTF8.GetBytes(jwt.RawHeader + "." + jwt.RawPayload);
             byte[] signatureBytes = Base64UrlEncoder.DecodeBytes(jwt.RawSignature);
 
             // if the kid != null and the signature fails, throw SecurityTokenSignatureKeyNotFoundException

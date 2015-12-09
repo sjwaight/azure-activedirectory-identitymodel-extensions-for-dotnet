@@ -92,6 +92,16 @@ namespace Microsoft.IdentityModel.Tokens
             return CreateProvider(key, algorithm, false);
         }
 
+        public virtual EncryptionProvider CreateForEncrypting(SecurityKey key, string algorithm, byte[] iv)
+        {
+            return CreateEncryptionProvider(key, algorithm, iv, false);
+        }
+
+        public virtual EncryptionProvider CreateForDecrypting(SecurityKey key, string algorithm, byte[] iv)
+        {
+            return CreateEncryptionProvider(key, algorithm, iv, false);
+        }
+
         /// <summary>
         /// When finished with a <see cref="SignatureProvider"/> call this method for cleanup. The default behavior is to call <see cref="SignatureProvider.Dispose(bool)"/>
         /// </summary>
@@ -133,6 +143,36 @@ namespace Microsoft.IdentityModel.Tokens
                 }
             }
 
+            throw LogHelper.LogException<ArgumentException>(LogMessages.IDX10600, typeof(SignatureProvider), typeof(SecurityKey), typeof(AsymmetricSecurityKey), typeof(SymmetricSecurityKey), key.GetType());
+        }
+
+        private EncryptionProvider CreateEncryptionProvider(SecurityKey key, string algorithm, byte[] iv, bool willEncrypt)
+        {
+            if (key == null)
+                throw LogHelper.LogArgumentNullException("key");
+
+            if (algorithm == null)
+                throw LogHelper.LogArgumentNullException("algorithm");
+
+            if (string.IsNullOrWhiteSpace(algorithm))
+                throw LogHelper.LogException<ArgumentException>(LogMessages.IDX10002, "algorithm");
+
+            if (willEncrypt)
+            {
+                AsymmetricSecurityKey asymmetricKey = key as AsymmetricSecurityKey;
+                if (asymmetricKey != null)
+                {
+#if DOTNET5_4
+                    return new AsymmetricEncryptionProvider(asymmetricKey, algorithm, RSAEncryptionPadding.OaepSHA256);
+#else
+                    return new AsymmetricEncryptionProvider(asymmetricKey, algorithm, true);
+#endif
+                }
+
+                SymmetricSecurityKey symmetricKey = key as SymmetricSecurityKey;
+                if (symmetricKey != null)
+                    return new SymmetricEncryptionProvider(symmetricKey, algorithm, null);
+            }
             throw LogHelper.LogException<ArgumentException>(LogMessages.IDX10600, typeof(SignatureProvider), typeof(SecurityKey), typeof(AsymmetricSecurityKey), typeof(SymmetricSecurityKey), key.GetType());
         }
     }

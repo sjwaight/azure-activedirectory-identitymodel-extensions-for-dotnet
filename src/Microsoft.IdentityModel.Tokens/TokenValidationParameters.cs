@@ -85,6 +85,10 @@ namespace Microsoft.IdentityModel.Tokens
     /// <param name="validationParameters"><see cref="TokenValidationParameters"/> required for validation.</param>
     public delegate SecurityToken SignatureValidator(string token, TokenValidationParameters validationParameters);
 
+    public delegate string DecryptCipherText(SecurityToken securityToken, SecurityKey contentEncryptionKey, TokenValidationParameters validationParameters);
+    public delegate IEnumerable<SecurityKey> EncryptionKeyResolver(string token, SecurityToken securityToken, string kid, TokenValidationParameters validationParameters);
+
+
     /// <summary>
     /// Contains a set of parameters that are used by a <see cref="SecurityTokenHandler"/> when validating a <see cref="SecurityToken"/>.
     /// </summary>
@@ -576,6 +580,18 @@ namespace Microsoft.IdentityModel.Tokens
         /// Gets or sets the <see cref="IEnumerable{String}"/> that contains valid issuers that will be used to check against the token's issuer.
         /// </summary>
         public IEnumerable<string> ValidIssuers
+        {
+            get;
+            set;
+        }
+
+        public DecryptCipherText DecryptCipherText
+        {
+            get;
+            set;
+        }
+
+        public EncryptionKeyResolver EncryptionKeyResolver
         {
             get;
             set;
