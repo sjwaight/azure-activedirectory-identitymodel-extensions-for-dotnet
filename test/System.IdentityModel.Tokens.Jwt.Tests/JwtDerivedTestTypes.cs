@@ -141,14 +141,13 @@ namespace System.IdentityModel.Tokens.Jwt.Tests
             base.ValidateLifetime(notBefore, expires, jwt, validationParameters);
         }
 
-        protected override JwtSecurityToken ValidateSignature(string securityToken, TokenValidationParameters validationParameters)
-        {
-            Jwt = base.ValidateSignature(securityToken, validationParameters);
-            DerivedJwtSecurityToken derivedJwt = Jwt as DerivedJwtSecurityToken;
-            Assert.NotNull(derivedJwt);
-            ValidateSignatureCalled = true;
-            return Jwt;
-        }
+        //protected override SecurityKey ValidateSignature(JwtSecurityToken securityToken, TokenValidationParameters validationParameters)
+        //{
+        //    SecurityKey key = base.ValidateSignature(securityToken, validationParameters);
+        //    Assert.NotNull(key);
+        //    ValidateSignatureCalled = true;
+        //    return key;
+        //}
 
         public override ClaimsPrincipal ValidateToken(string securityToken, TokenValidationParameters validationParameters, out SecurityToken validatedToken)
         {

@@ -74,6 +74,7 @@ namespace System.IdentityModel.Tokens.Jwt.Tests
         public SecurityTokenDescriptor SecurityTokenDescriptor { get; set; }
         public byte[] Signature { get; set; }
         public SigningCredentials SigningCredentials { get; set; }
+        public CryptoProviderFactory CryptoProviderFactory { get; set; }
         public string SigningInput { get; set; }
         public Type TokenType { get; set; }
         public TokenValidationParameters TokenValidationParameters { get; set; }

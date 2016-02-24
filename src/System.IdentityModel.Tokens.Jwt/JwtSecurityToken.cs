@@ -27,6 +27,7 @@
 
 using System.Collections.Generic;
 using System.Security.Claims;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using Microsoft.IdentityModel.Logging;

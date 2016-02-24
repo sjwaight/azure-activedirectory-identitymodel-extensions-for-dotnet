@@ -293,13 +293,12 @@ namespace Microsoft.IdentityModel.Tokens.Tests
             throw new SecurityTokenInvalidLifetimeException("LifetimeValidatorThrows");
         }
         
-        public static JwtSecurityToken SignatureValidatorReturnsTokenAsIs(string token, TokenValidationParameters validationParameters)
+        public static SecurityKey SignatureValidatorReturnsTokenAsIs(SecurityToken token, TokenValidationParameters validationParameters)
         {
-            JwtSecurityToken jwt = new JwtSecurityToken(token);
-            return jwt;
+            return token.SigningKey;
         }
 
-        public static JwtSecurityToken SignatureValidatorThrows(string token, TokenValidationParameters validationParameters)
+        public static SecurityKey SignatureValidatorThrows(SecurityToken token, TokenValidationParameters validationParameters)
         {
             throw new SecurityTokenInvalidSignatureException("SignatureValidatorThrows");
         }
