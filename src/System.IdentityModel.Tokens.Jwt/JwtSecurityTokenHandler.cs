@@ -27,7 +27,9 @@
 
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.IO;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -511,6 +513,18 @@ namespace System.IdentityModel.Tokens.Jwt
             JwtPayload payload = new JwtPayload(issuer, audience, (claims == null ? null : OutboundClaimTypeTransform(claims)), notBefore, expires, issuedAt);
             JweHeader header = new JweHeader(encryptingCredentials);
 
+            if (encryptingCredentials.AdditionalAuthenticationData == null)
+                encryptingCredentials.AdditionalAuthenticationData = Encoding.ASCII.GetBytes(Base64UrlEncoder.Encode(header.SerializeToJson()));
+
+            using (Aes aes = Aes.Create())
+            {
+                if (encryptingCredentials.ContentEncryptionKey == null)
+                    encryptingCredentials.ContentEncryptionKey = new SymmetricSecurityKey(aes.Key);
+
+                if (encryptingCredentials.InitializationVector == null)
+                    encryptingCredentials.InitializationVector = aes.IV;
+            }
+
             IdentityModelEventSource.Logger.WriteVerbose(LogMessages.IDX10645);
             string rawHeader = header.Base64UrlEncode();
             string authenticationTag = null;
@@ -527,8 +541,64 @@ namespace System.IdentityModel.Tokens.Jwt
 
         private string EncryptPayload(JwtPayload payload, EncryptingCredentials encryptingCredentials, out string authenticationTag)
         {
-            authenticationTag = string.Empty;
-            return null;
+            byte[] cipherText;
+            authenticationTag = null;
+            using (Aes aes = Aes.Create())
+            {
+                SymmetricSecurityKey key = encryptingCredentials.ContentEncryptionKey as SymmetricSecurityKey;
+                if (key == null)
+                    return null;
+
+                aes.Key = key.Key;
+                aes.IV = encryptingCredentials.InitializationVector;
+                byte[] cek = aes.Key;
+                byte[] macKey = new byte[aes.KeySize / 2];
+                byte[] encKey = new byte[aes.KeySize / 2];
+                int i = 0;
+                for (; i < cek.Length / 2; i++)
+                    macKey[i] = cek[i];
+                for (; i < cek.Length; i++)
+                    encKey[i] = cek[i];
+
+                ICryptoTransform encryptor = aes.CreateEncryptor();
+
+                using (MemoryStream msEncrypt = new MemoryStream())
+                {
+                    using (CryptoStream csEncrypt = new CryptoStream(msEncrypt, encryptor, CryptoStreamMode.Write))
+                    {
+                        using (StreamWriter swEncrypt = new StreamWriter(csEncrypt))
+                        {
+                            swEncrypt.Write(payload.SerializeToJson());
+                        }
+                        cipherText = msEncrypt.ToArray();
+                    }
+                }
+            }
+
+            authenticationTag = ComputeHmac(encryptingCredentials.AdditionalAuthenticationData, encryptingCredentials.InitializationVector, cipherText);
+            return Base64UrlEncoder.Encode(cipherText);
+
+        }
+
+        private string ComputeHmac(byte[] aad, byte[] iv, byte[] cipher)
+        {
+            HMACSHA256 hmac = new HMACSHA256();
+            byte[] al = BitConverter.GetBytes(aad.Length);
+
+            int totalLength = aad.Length + iv.Length + al.Length + cipher.Length;
+            byte[] input = new byte[totalLength];
+
+            int j = 0;
+            for (int i = 0; i < aad.Length; i++) input[j++] = aad[i];
+            for (int i = 0; i < iv.Length; i++) input[j++] = iv[i];
+            for (int i = 0; i < cipher.Length; i++) input[j++] = cipher[i];
+            for (int i = 0; i < al.Length; i++) input[j++] = al[i];
+            byte[] hash = hmac.ComputeHash(input);
+            byte[] authTag = new byte[hash.Length / 2];
+            for (int i = 0; i < hash.Length / 2; i++)
+                authTag[i] = hash[i];
+
+            return Base64UrlEncoder.Encode(authTag);
         }
 
         private IEnumerable<Claim> OutboundClaimTypeTransform(IEnumerable<Claim> claims)

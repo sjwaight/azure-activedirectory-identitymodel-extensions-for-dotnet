@@ -56,7 +56,7 @@ namespace Microsoft.IdentityModel.Tokens
         public SecurityKey Key
         {
             get;
-            private set;
+            set;
         }
 
         /// <summary>
@@ -65,7 +65,7 @@ namespace Microsoft.IdentityModel.Tokens
         public SecurityKey ContentEncryptionKey
         {
             get;
-            private set;
+            set;
         }
 
         public string Kid
@@ -81,6 +81,6 @@ namespace Microsoft.IdentityModel.Tokens
 
         public string AuthenticationTag { get; set; }
 
-        public string AssociatedAuthenticationData { get; set; }
+        public byte[] AdditionalAuthenticationData { get; set; }
     }
 }
