@@ -92,14 +92,14 @@ namespace Microsoft.IdentityModel.Tokens
             return CreateProvider(key, algorithm, false);
         }
 
-        public virtual EncryptionProvider CreateForEncrypting(SecurityKey key, string algorithm, byte[] iv)
+        public virtual EncryptionProvider CreateForEncrypting(SecurityKey key, string algorithm)
         {
-            return CreateEncryptionProvider(key, algorithm, iv, false);
+            return CreateEncryptionProvider(key, algorithm, true);
         }
 
-        public virtual EncryptionProvider CreateForDecrypting(SecurityKey key, string algorithm, byte[] iv)
+        public virtual EncryptionProvider CreateForDecrypting(SecurityKey key, string algorithm)
         {
-            return CreateEncryptionProvider(key, algorithm, iv, false);
+            return CreateEncryptionProvider(key, algorithm, false);
         }
 
         /// <summary>
@@ -146,7 +146,7 @@ namespace Microsoft.IdentityModel.Tokens
             throw LogHelper.LogException<ArgumentException>(LogMessages.IDX10600, typeof(SignatureProvider), typeof(SecurityKey), typeof(AsymmetricSecurityKey), typeof(SymmetricSecurityKey), key.GetType());
         }
 
-        private EncryptionProvider CreateEncryptionProvider(SecurityKey key, string algorithm, byte[] iv, bool willEncrypt)
+        private EncryptionProvider CreateEncryptionProvider(SecurityKey key, string algorithm, bool willEncrypt)
         {
             if (key == null)
                 throw LogHelper.LogArgumentNullException("key");

@@ -53,7 +53,7 @@ namespace Microsoft.IdentityModel.Tokens
 #else
         private void ResolveDesktopEncryptionProvider(SymmetricSecurityKey key, string algorithm)
         {
-            throw new NotImplementedException();
+            //throw new NotImplementedException();
         }
 #endif
 
@@ -77,8 +77,9 @@ namespace Microsoft.IdentityModel.Tokens
             return null;
         }
 
-        public byte[] Encrypt(byte[] input, byte[] iv, string authenticationTag)
+        public byte[] Encrypt(byte[] input, byte[] iv, out string authenticationTag)
         {
+            authenticationTag = null;
             return null;
         }
 

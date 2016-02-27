@@ -89,5 +89,16 @@ namespace Microsoft.IdentityModel.Tokens
         public const string Sha256 = "SHA256";
         public const string Sha384 = "SHA384";
         public const string Sha512 = "SHA512";
+
+        /// see: http://tools.ietf.org/html/rfc7518#section-4.1
+        public const string Aes128KW = "A128KW";
+        public const string Aes192KW = "A192KW";
+        public const string Aes256KW = "A256KW";
+        public const string Aes128GcmKW = "A128GCMKW";
+        public const string Aes192GcmKW = "A192GCMKW";
+        public const string Aes256GcmKW = "A256GCMKW";
+        public const string RsaOaep = "RSA-OAEP";
+        public const string RsaOaep256 = "RSA-OAEP-256";
+        public const string DirectEncryption = "dir";
     }
 }

@@ -536,13 +536,73 @@ namespace System.IdentityModel.Tokens.Jwt
 
         private string EncryptContentEncryptionKey(SecurityKey contentEncryptionKey, EncryptingCredentials encryptingCredentials)
         {
+            string alg = encryptingCredentials.KeyEncryptionAlgorithm;
+            KeyManagementModes mode = ResolveKeyManagementMode(alg);
+            byte[] encryptedKey = null;
+            if (mode == KeyManagementModes.DirectEncryption)
+                return string.Empty;
+            else if (mode == KeyManagementModes.KeyEncryption)
+            {
+                // need recipient public key - rsa params
+                // use rsa.create() -> rsa.import() -> rsa.encrypt(cek)
+                // return base64url encoding
+            }
+            else if (mode == KeyManagementModes.KeyWrapping)
+            {
+                int keySize = 128;
+                if (alg == SecurityAlgorithms.Aes128KW)
+                    keySize = 128;
+                if (alg == SecurityAlgorithms.Aes192KW)
+                    keySize = 192;
+                if (alg == SecurityAlgorithms.Aes256KW)
+                    keySize = 256;
+
+                using (Aes aes = Aes.Create())
+                {
+                    aes.KeySize = keySize;
+                    aes.GenerateKey();
+
+                    ICryptoTransform encryptor = aes.CreateEncryptor();
+                    using (MemoryStream msEncrypt = new MemoryStream())
+                    {
+                        using (CryptoStream csEncrypt = new CryptoStream(msEncrypt, encryptor, CryptoStreamMode.Write))
+                        {
+                            using (StreamWriter swEncrypt = new StreamWriter(csEncrypt))
+                            {
+                                swEncrypt.Write(contentEncryptionKey);
+                            }
+                            encryptedKey = msEncrypt.ToArray();
+                        }
+                    }
+                }
+            }
+            if (encryptedKey != null)
+                return Base64UrlEncoder.Encode(encryptedKey);
+
             return null;
         }
 
         private string EncryptPayload(JwtPayload payload, EncryptingCredentials encryptingCredentials, out string authenticationTag)
         {
-            byte[] cipherText;
+            byte[] cipherText = null;
             authenticationTag = null;
+
+            if (encryptingCredentials.ContentEncryptionKey != null)
+            {
+                SymmetricEncryptionProvider encProvider = encryptingCredentials.ContentEncryptionKey.CryptoProviderFactory.CreateForEncrypting(encryptingCredentials.ContentEncryptionKey, encryptingCredentials.ContentEncryptionAlgorithm) as SymmetricEncryptionProvider;
+                cipherText = encProvider.Encrypt(Encoding.UTF8.GetBytes(payload.SerializeToJson()), encryptingCredentials.InitializationVector, out authenticationTag);
+            }
+            else if (encryptingCredentials.KeyEncryptionAlgorithm == SecurityAlgorithms.DirectEncryption)
+            {
+                LogHelper.LogArgumentNullException("ContentEncryptionKey");
+            }
+            else
+            {
+                // generate CEK
+
+            }
+            return Base64UrlEncoder.Encode(cipherText);
+            /*
             using (Aes aes = Aes.Create())
             {
                 SymmetricSecurityKey key = encryptingCredentials.ContentEncryptionKey as SymmetricSecurityKey;
@@ -574,10 +634,9 @@ namespace System.IdentityModel.Tokens.Jwt
                     }
                 }
             }
-
-            authenticationTag = ComputeHmac(encryptingCredentials.AdditionalAuthenticationData, encryptingCredentials.InitializationVector, cipherText);
-            return Base64UrlEncoder.Encode(cipherText);
-
+            */
+            //authenticationTag = ComputeHmac(encryptingCredentials.AdditionalAuthenticationData, encryptingCredentials.InitializationVector, cipherText);
+            //return Base64UrlEncoder.Encode(cipherText);
         }
 
         private string ComputeHmac(byte[] aad, byte[] iv, byte[] cipher)
@@ -599,6 +658,28 @@ namespace System.IdentityModel.Tokens.Jwt
                 authTag[i] = hash[i];
 
             return Base64UrlEncoder.Encode(authTag);
+        }
+
+        private KeyManagementModes ResolveKeyManagementMode(string alg)
+        {
+            if (string.IsNullOrEmpty(alg))
+                throw new ArgumentException();
+
+            switch (alg)
+            {
+                case SecurityAlgorithms.RsaOaep:
+                case SecurityAlgorithms.RsaOaep256: return KeyManagementModes.KeyEncryption;
+                case SecurityAlgorithms.Aes128KW:
+                case SecurityAlgorithms.Aes192KW:
+                case SecurityAlgorithms.Aes256KW:
+                case SecurityAlgorithms.Aes128GcmKW:
+                case SecurityAlgorithms.Aes192GcmKW:
+                case SecurityAlgorithms.Aes256GcmKW: return KeyManagementModes.KeyWrapping;
+                case SecurityAlgorithms.DirectEncryption: return KeyManagementModes.DirectEncryption;
+                case "default":
+                    throw new ArgumentException();
+            }
+            throw new ArgumentException();
         }
 
         private IEnumerable<Claim> OutboundClaimTypeTransform(IEnumerable<Claim> claims)
