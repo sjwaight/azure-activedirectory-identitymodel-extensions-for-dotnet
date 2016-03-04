@@ -287,7 +287,7 @@ namespace System.IdentityModel.Tokens.Jwt
             var regex = new Regex(JwtConstants.JsonCompactSerializationRegex, RegexOptions.None, TimeSpan.FromMilliseconds(100));
 
             // match jwe
-            if( !regex.IsMatch(tokenString))
+            if (!regex.IsMatch(tokenString))
                 regex = new Regex(JwtConstants.JweCompactSerializationRegex, RegexOptions.None, TimeSpan.FromMilliseconds(100));
 
             if (!regex.IsMatch(tokenString))
@@ -516,13 +516,11 @@ namespace System.IdentityModel.Tokens.Jwt
             if (encryptingCredentials.AdditionalAuthenticationData == null)
                 encryptingCredentials.AdditionalAuthenticationData = Encoding.ASCII.GetBytes(Base64UrlEncoder.Encode(header.SerializeToJson()));
 
-            using (Aes aes = Aes.Create())
+            if (encryptingCredentials.ContentEncryptionKey == null)
             {
-                if (encryptingCredentials.ContentEncryptionKey == null)
-                    encryptingCredentials.ContentEncryptionKey = new SymmetricSecurityKey(aes.Key);
-
-                if (encryptingCredentials.InitializationVector == null)
-                    encryptingCredentials.InitializationVector = aes.IV;
+                byte[] iv;
+                encryptingCredentials.ContentEncryptionKey = GenerateContentEncryptionKeyAndIV(encryptingCredentials, out iv);
+                encryptingCredentials.InitializationVector = iv;
             }
 
             IdentityModelEventSource.Logger.WriteVerbose(LogMessages.IDX10645);
@@ -532,6 +530,29 @@ namespace System.IdentityModel.Tokens.Jwt
             string jweEncryptedKey = EncryptContentEncryptionKey(header.EncryptingCredentials.ContentEncryptionKey, header.EncryptingCredentials);
 
             return new JwtSecurityToken(header, jweEncryptedKey, header.EncryptingCredentials.InitializationVector, encryptedPayload, authenticationTag);
+        }
+
+        private SecurityKey GenerateContentEncryptionKeyAndIV(EncryptingCredentials encryptingCredentials, out byte[] IV)
+        {
+            string enc = encryptingCredentials.ContentEncryptionAlgorithm;
+
+            int keySize = 128;
+            if (enc == SecurityAlgorithms.A128CbcHS256)
+                keySize = 128;
+            else if (enc == SecurityAlgorithms.A192CbcHS384)
+                keySize = 192;
+            else if (enc == SecurityAlgorithms.A256CbcHS512)
+                keySize = 256;
+            else
+                throw new ArgumentOutOfRangeException();
+
+            using (Aes aes = Aes.Create())
+            {
+                aes.KeySize = keySize;
+                aes.GenerateKey();
+                IV = aes.IV;
+                return new SymmetricSecurityKey(aes.Key);
+            }
         }
 
         private string EncryptContentEncryptionKey(SecurityKey contentEncryptionKey, EncryptingCredentials encryptingCredentials)
@@ -587,21 +608,13 @@ namespace System.IdentityModel.Tokens.Jwt
             byte[] cipherText = null;
             authenticationTag = null;
 
-            if (encryptingCredentials.ContentEncryptionKey != null)
-            {
-                SymmetricEncryptionProvider encProvider = encryptingCredentials.ContentEncryptionKey.CryptoProviderFactory.CreateForEncrypting(encryptingCredentials.ContentEncryptionKey, encryptingCredentials.ContentEncryptionAlgorithm) as SymmetricEncryptionProvider;
-                cipherText = encProvider.Encrypt(Encoding.UTF8.GetBytes(payload.SerializeToJson()), encryptingCredentials.InitializationVector, out authenticationTag);
-            }
-            else if (encryptingCredentials.KeyEncryptionAlgorithm == SecurityAlgorithms.DirectEncryption)
-            {
-                LogHelper.LogArgumentNullException("ContentEncryptionKey");
-            }
-            else
-            {
-                // generate CEK
+            if (encryptingCredentials.ContentEncryptionKey == null)
+                LogHelper.LogArgumentNullException("encryptingCredentials.ContentEncryptionKey");
 
-            }
+            SymmetricEncryptionProvider encProvider = encryptingCredentials.ContentEncryptionKey.CryptoProviderFactory.CreateForEncrypting(encryptingCredentials.ContentEncryptionKey, encryptingCredentials.ContentEncryptionAlgorithm) as SymmetricEncryptionProvider;
+            cipherText = encProvider.Encrypt(Encoding.UTF8.GetBytes(payload.SerializeToJson()), encryptingCredentials.InitializationVector, out authenticationTag);
             return Base64UrlEncoder.Encode(cipherText);
+            
             /*
             using (Aes aes = Aes.Create())
             {
@@ -1183,7 +1196,7 @@ namespace System.IdentityModel.Tokens.Jwt
                 Claim c = new Claim(claimType, jwtClaim.Value, jwtClaim.ValueType, issuer, issuer, identity);
                 if (jwtClaim.Properties.Count > 0)
                 {
-                    foreach(var kv in jwtClaim.Properties)
+                    foreach (var kv in jwtClaim.Properties)
                     {
                         c.Properties[kv.Key] = kv.Value;
                     }
