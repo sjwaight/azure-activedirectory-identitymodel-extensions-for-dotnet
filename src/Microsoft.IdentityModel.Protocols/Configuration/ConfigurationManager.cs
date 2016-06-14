@@ -183,7 +183,7 @@ namespace Microsoft.IdentityModel.Protocols
                 return _currentConfiguration;
             }
 
-            await _refreshLock.WaitAsync(cancel);
+            await _refreshLock.WaitAsync(cancel).ConfigureAwait(false);
             try
             {
                 if (_syncAfter <= now)
