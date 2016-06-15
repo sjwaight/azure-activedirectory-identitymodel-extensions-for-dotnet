@@ -1,6 +1,8 @@
 #Windows Azure Active Directory IdentityModel Extensions for .Net
 ===========
 
+Note: single modification to version number to make this a drop-in for MSAL nuget available right now.
+
 IdentityModel Extensions for .Net provide assemblies that are interesting for web developers that wish to use federated identity providers for establishing the callers identity. 
 
 ## Samples and Documentation
